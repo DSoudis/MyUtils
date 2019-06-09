@@ -10,63 +10,17 @@ import pandas as pd
 import scipy.stats as sps
 from sklearn.model_selection import RepeatedStratifiedKFold, StratifiedKFold, RepeatedKFold, KFold
 from sklearn.metrics import accuracy_score, log_loss, mean_absolute_error, mean_squared_error, f1_score, r2_score, roc_auc_score
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, RandomForestRegressor, GradientBoostingRegressor
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.svm import LinearSVC, LinearSVR, SVC, SVR
 from sklearn.linear_model import ElasticNet, LogisticRegression
 from sklearn.model_selection import RandomizedSearchCV, cross_val_score
-from sklearn.feature_selection import SelectFwe, f_classif, f_regression
 from scipy.stats import randint as sp_randint, uniform as sp_unif, sem as npsem
-from boruta import BorutaPy
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import RobustScaler, StandardScaler
 from skopt import BayesSearchCV
 from sklearn.model_selection import learning_curve
-
-####################### Clean functions ##########################
-# Selector for F_test
-def f_selector(X_train, y_train, classif = True, alpha = 0.05):
-    """
-    Selects features by means of ANOVA and returns a bool object that can be used for indexing
-    
-    params:
-    - X_train: features to choose from
-    - y_train: labels
-    - classif: True if classification eitherwise False
-    - alpha: significance level
-    """
-    if classif == True:
-        selector_F = SelectFwe(f_classif, alpha = alpha)
-        selector_F.fit(X_train, y_train)
-        return selector_F.get_support()
-    else:
-        selector_F = SelectFwe(f_regression, alpha = alpha)
-        selector_F.fit(X_train, y_train)
-        return selector_F.get_support()
-
-#Selector Boruta
-def b_selector(X_train, y_train, classif = True, random_state = 42, max_iter=50):
-    """
-    Selects features by means of ANOVA and returns a bool object that can be used for indexing
-    
-    params:
-    - X_train: features to choose from
-    - y_train: labels
-    - alpha: significance level
-    """
-    if isinstance(X_train, pd.DataFrame):
-        X_train = X_train.values
-        
-    if classif == True:
-        rf = RandomForestClassifier(n_jobs=-1, n_estimators=10, random_state=random_state)
-        selector = BorutaPy(rf, random_state=random_state, verbose = 1, max_iter=max_iter)
-        selector.fit(X_train, y_train)
-        return selector.support_
-    else:
-        rf = RandomForestRegressor(n_jobs=-1, n_estimators=10, random_state=random_state)
-        selector = BorutaPy(rf, random_state=random_state, verbose = 1, max_iter=max_iter)
-        selector.fit(X_train, y_train)
-        return selector.support_
+from lightgbm import LGBMRegressor, LGBMClassifier
 
 # Return lists of models
 def get_models(proba = False, classif = True, random_state = 42):
@@ -82,16 +36,16 @@ def get_models(proba = False, classif = True, random_state = 42):
     if classif == False:
         return [RandomForestRegressor(random_state = random_state, n_jobs =-1, n_estimators = 500), Pipeline([('standartize', RobustScaler()), ('LSVR', LinearSVR(random_state= random_state, loss = 'epsilon_insensitive'))]),
                Pipeline([('standartize', RobustScaler()), ('SVR', SVR())]), Pipeline([('standartize', RobustScaler()), ('ElNet', ElasticNet(random_state = random_state))]),
-               Pipeline([('standartize', RobustScaler()), ('KNN', KNeighborsRegressor(n_jobs = -1))])], ['RF', 'LSVR', 'SVR', 'ElNet', 'KNN']
+               Pipeline([('standartize', RobustScaler()), ('KNN', KNeighborsRegressor(n_jobs = -1))]), LGBMRegressor(n_jobs=-1, random_state= random_state)], ['RF', 'LSVR', 'SVR', 'ElNet', 'KNN', 'LGB']
     
     if proba == False:
         return [RandomForestClassifier(random_state = random_state, n_jobs =-1, n_estimators = 500), Pipeline([('standartize', RobustScaler()), ('LSVC', LinearSVC(random_state= random_state, dual = False, loss = 'squared_hinge'))]),
                Pipeline([('standartize', RobustScaler()), ('SVC', SVC(random_state= random_state))]), Pipeline([('standartize', RobustScaler()), ('Logit', LogisticRegression(random_state = random_state, n_jobs = -1, solver = 'saga', max_iter = 5000))]),
-               Pipeline([('standartize', RobustScaler()), ('KNN', KNeighborsClassifier(n_jobs = -1))])], ['RF', 'LSVC', 'SVC', 'Logit', 'KNN']
+               Pipeline([('standartize', RobustScaler()), ('KNN', KNeighborsClassifier(n_jobs = -1))]), LGBMClassifier(n_jobs=-1, random_state=random_state)], ['RF', 'LSVC', 'SVC', 'Logit', 'KNN', 'LGB']
     else:
         return [RandomForestClassifier(random_state = random_state, n_jobs =-1, n_estimators = 500), Pipeline([('standartize', RobustScaler()), ('SVC', SVC(kernel = 'linear', random_state= random_state, probability=True))]),
                Pipeline([('standartize', RobustScaler()), ('SVC', SVC(random_state= random_state, probability=True))]), Pipeline([('standartize', RobustScaler()), ('Logit', LogisticRegression(random_state = random_state, n_jobs = -1, solver = 'saga', max_iter = 5000))]),
-               Pipeline([('standartize', RobustScaler()), ('KNN', KNeighborsClassifier(n_jobs = -1))])], ['RF', 'LSVC', 'SVC', 'Logit', 'KNN']
+               Pipeline([('standartize', RobustScaler()), ('KNN', KNeighborsClassifier(n_jobs = -1))]), LGBMClassifier(n_jobs=-1, random_state= random_state)], ['RF', 'LSVC', 'SVC', 'Logit', 'KNN', 'LGB']
 
 
 # Validator with ttest
@@ -185,26 +139,27 @@ def get_params_rand(proba = False, classif = True):
     
     """
     if classif == False:
-        return [{'max_depth': sp_randint(1, 50), 'min_samples_leaf': sp_randint(2, 20), 'max_features': ['auto', 'sqrt', 'log2']},
-               {'LSVR__C': sp_unif(0.01, 100)},
-               {'SVR__C': sp_unif(0.01, 100), 'SVR__gamma': sp_unif(0.001, 0.1), 'SVR__epsilon': sp_unif(0.1, 0.89)},
-               {'ElNet__alpha': sp_unif(0.01, 100), 'ElNet__l1_ratio': sp_unif(0, 0.999)},
-               {'KNN__n_neighbors': sp_randint(2, 50), 'KNN__weights': ['uniform', 'distance']},
+        return [{'max_depth': sp_randint(1, 50), 'min_samples_leaf': sp_randint(2, 20), 'max_features': sp_expon.rvs(0.03, 0.11)},
+               {'LSVR__C': sp_expon(scale = 100)},
+               {'SVR__C': sp_expon(scale = 100), 'SVR__gamma': sp_expon(scale = 0.1)},
+               {'ElNet__alpha': sp_expon(scale = 100), 'ElNet__l1_ratio': sp_unif(0, 0.999)},
+               {'KNN__n_neighbors': sp_randint(2, 30), 'KNN__weights': ['uniform', 'distance']},
+               {'LGBRagressor': }
                ]
         
     if proba == False:
-        return [{'max_depth': sp_randint(1, 50), 'min_samples_leaf': sp_randint(2, 20), 'max_features': ['sqrt', 'log2']},
-               {'LSVC__C': sp_unif(0.01, 100), 'LSVC__penalty': ['l2', 'l1']},
-               {'SVC__C': sp_unif(0.01, 100), 'SVC__gamma': sp_unif(0.0001, 0.1)},
-               {'Logit__penalty': ['l2', 'l1'], 'Logit__C': sp_unif(0.01, 100)},
-               {'KNN__n_neighbors': sp_randint(2, 50), 'KNN__weights': ['uniform', 'distance']},
+        return [{'max_depth': sp_randint(1, 50), 'min_samples_leaf': sp_randint(2, 20), 'max_features': sp_expon.rvs(0.03, 0.11)},
+               {'LSVC__C': sp_expon(scale = 100), 'LSVC__penalty': ['l2', 'l1']},
+               {'SVC__C': sp_expon(scale = 100), 'SVC__gamma': sp_expon(scale = 0.1)},
+               {'Logit__penalty': ['l2', 'l1'], 'Logit__C': sp_expon(scale = 100)},
+               {'KNN__n_neighbors': sp_randint(2, 30), 'KNN__weights': ['uniform', 'distance']},
                ]
     else:
-        return [{'max_depth': sp_randint(1, 50), 'min_samples_leaf': sp_randint(2, 20), 'max_features': ['sqrt', 'log2']},
-               {'LSVC__C': sp_unif(0.01, 100)},
-               {'SVC__C': sp_unif(0.01, 100), 'SVC__gamma': sp_unif(0.0001, 0.1)},
-               {'Logit__penalty': ['l2', 'l1'], 'Logit__C': sp_unif(0.01, 100)},
-               {'KNN__n_neighbors': sp_randint(2, 50), 'KNN__weights': ['uniform', 'distance']},
+        return [{'max_depth': sp_randint(1, 50), 'min_samples_leaf': sp_randint(2, 20), 'max_features': sp_expon.rvs(0.03, 0.11)},
+               {'LSVC__C': sp_expon(scale = 100)},
+               {'SVC__C': sp_expon(scale = 100), 'SVC__gamma': sp_expon(scale = 0.1)},
+               {'Logit__penalty': ['l2', 'l1'], 'Logit__C': sp_expon(scale = 100)},
+               {'KNN__n_neighbors': sp_randint(2, 30), 'KNN__weights': ['uniform', 'distance']},
                ]
         
 def get_params_skopt(proba = False, classif = True):
@@ -214,26 +169,26 @@ def get_params_skopt(proba = False, classif = True):
     
     """
     if classif == False:
-        return [{'max_depth': (1, 50), 'min_samples_leaf': (2, 20), 'max_features': ['auto', 'sqrt', 'log2']},
-               {'LSVR__C': (1e-6, 1e+6, 'log-uniform')},
-               {'SVR__C': (1e-6, 1e+6, 'log-uniform'), 'SVR__gamma': (1e-6, 1e+1, 'log-uniform'), 'SVR__epsilon': (0.001, 1, 'log-uniform')},
-               {'ElNet__alpha': (1e-6, 1e+6, 'log-uniform'), 'ElNet__l1_ratio': (0.001, 1, 'log-uniform')},
-               {'KNN__n_neighbors': (2, 50), 'KNN__weights': ['uniform', 'distance']},
+        return [{'max_depth': (1, 50, 'uniform'), 'min_samples_leaf': (2, 20, 'uniform'), 'max_features': (0.03, 0.11, 'log_uniform')},
+               {'LSVR__C': (0.001, 1e+3, 'log-uniform')},
+               {'SVR__C': (0.001, 1e+3, 'log-uniform'), 'SVR__gamma': (0.01, 0.3, 'log-uniform')},
+               {'ElNet__alpha': (0.001, 1e+3, 'log-uniform'), 'ElNet__l1_ratio': (0, 1, 'log-uniform')},
+               {'KNN__n_neighbors': (2, 30), 'KNN__weights': ['uniform', 'distance']},
                ]
         
     if proba == False:
-        return [{'max_depth': (1, 50), 'min_samples_leaf': (2, 20), 'max_features': ['sqrt', 'log2']},
-               {'LSVC__C': (1e-6, 1e+6, 'log-uniform'), 'LSVC__penalty': ['l2', 'l1']},
-               {'SVC__C': (1e-6, 1e+6, 'log-uniform'), 'SVC__gamma': (1e-6, 1e+1, 'log-uniform')},
-               {'Logit__penalty': ['l2', 'l1'], 'Logit__C': (1e-6, 1e+6, 'log-uniform')},
-               {'KNN__n_neighbors': (2, 50), 'KNN__weights': ['uniform', 'distance']},
+        return [{'max_depth': (1, 50, 'uniform'), 'min_samples_leaf': (2, 20, 'uniform'), 'max_features': (0.03, 0.11, 'log_uniform')},
+               {'LSVC__C': (0.001, 1e+3, 'log-uniform'), 'LSVC__penalty': ['l2', 'l1']},
+               {'SVC__C': (0.001, 1e+3, 'log-uniform'), 'SVC__gamma': (0.01, 0.3, 'log-uniform')},
+               {'Logit__penalty': ['l2', 'l1'], 'Logit__C': (0.001, 1e+3, 'log-uniform')},
+               {'KNN__n_neighbors': (2, 30), 'KNN__weights': ['uniform', 'distance']},
                ]
     else:
-        return [{'max_depth': (1, 50), 'min_samples_leaf': (2, 20), 'max_features': ['sqrt', 'log2']},
-               {'LSVC__C': (1e-6, 1e+6, 'log-uniform')},
-               {'SVC__C': (1e-6, 1e+6, 'log-uniform'), 'SVC__gamma': (1e-6, 1e+1, 'log-uniform')},
-               {'Logit__penalty': ['l2', 'l1'], 'Logit__C': (1e-6, 1e+6, 'log-uniform')},
-               {'KNN__n_neighbors': (2, 50), 'KNN__weights': ['uniform', 'distance']},
+        return [{'max_depth': (1, 50, 'uniform'), 'min_samples_leaf': (2, 20, 'uniform'), 'max_features': (0.03, 0.11, 'log_uniform')},
+               {'LSVC__C': (0.001, 1e+3, 'log-uniform')},
+               {'SVC__C': (0.001, 1e+3, 'log-uniform'), 'SVC__gamma': (0.001, 0.3, 'log-uniform')},
+               {'Logit__penalty': ['l2', 'l1'], 'Logit__C': (0.001, 1e+3, 'log-uniform')},
+               {'KNN__n_neighbors': (2, 30), 'KNN__weights': ['uniform', 'distance']},
                ]
 
 
@@ -426,7 +381,7 @@ def NestedBayesCV(tups, y_train, cv_outer = StratifiedKFold(10, random_state=42)
     return results
 
 
-def tester(models, trains, tests, y_train, y_test, names, random_state = 42, scoring = 'accuracy'):
+def get_test_score(models, trains, tests, y_train, y_test, names, random_state = 42, scoring = 'accuracy'):
     """
     Given a list of models, a list of train datasets, and a list of tests datasets, this will
     score the different algorithms agains the tests data and return a dataframe with the scores
@@ -605,5 +560,3 @@ def plot_learning_curve(estimator, title, X, y, ylim=None, cv=None,
 
     plt.legend(loc="best")
     return plt
-
-###################### End Clean functions ############################3
